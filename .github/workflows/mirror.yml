@@ -14,4 +14,4 @@ jobs:
           git clone --mirror https://github.com/torvalds/linux.git kernel.git
           cd kernel.git
 
-          git push --mirror https://${{ secrets.CODEBERG_TOKEN }}@codeberg.org/YOUR_USERNAME/YOUR_REPO.git
+          git push --mirror https://${{ secrets.CODEBERG_TOKEN }}@codeberg.org/spiritedcaveman/linux-lab
