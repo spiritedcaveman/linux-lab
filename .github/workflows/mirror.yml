@@ -8,14 +8,14 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Delta Mirror to Codeberg
+      - name: Force Sync All Tags
         run: |
-          # Increase buffer for safety
-          git config --global http.postBuffer 524288000
-          
-          # Clone only the latest to keep the runner fast
-          git clone --mirror --depth 50 https://github.com/torvalds/linux.git kernel.git
+          git clone --mirror https://github.com/torvalds/linux.git kernel.git
           cd kernel.git
-
-          # Force push 
-          git push --force https://${{ secrets.CODEBERG_TOKEN }}@codeberg.org/spiritedcaveman/linux-lab.git
+          git remote add codeberg https://${{ secrets.CODEBERG_TOKEN }}@codeberg.org/spiritedcaveman/linux-lab.git
+          
+          # Force push all tags specifically
+          git push --force codeberg --tags
+          
+          # Then sync the branches
+          git push --force codeberg master
