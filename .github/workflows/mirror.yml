@@ -1,25 +1,21 @@
-name: Full Kernel Mirror
+name: Linux Lab Sync
 on:
-  workflow_dispatch: 
+  schedule:
+    - cron: "*/5 * * * *" # Every 5 minutes
+  workflow_dispatch:      # Allows manual trigger
 
 jobs:
-  mirror:
+  sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Heavy Duty Mirror
+      - name: Delta Mirror to Codeberg
         run: |
-          # 1. Increase buffers to the max
-          git config --global http.postBuffer 1048576000
-          git config --global core.compression 9
-
-          #
-          git clone --mirror https://github.com/torvalds/linux.git kernel.git
+          # Increase buffer for safety
+          git config --global http.postBuffer 524288000
+          
+          # Clone only the latest to keep the runner fast
+          git clone --mirror --depth 50 https://github.com/torvalds/linux.git kernel.git
           cd kernel.git
 
-          # 3. Add Codeberg
-          git remote add codeberg https://${{ secrets.CODEBERG_TOKEN }}@codeberg.org/spiritedcaveman/linux-lab.git
-
-          
-          git push codeberg main
-          git push --tags codeberg
-          git push --mirror codeberg
+          # Force push 
+          git push --force https://${{ secrets.CODEBERG_TOKEN }}@codeberg.org/spiritedcaveman/linux-lab.git
