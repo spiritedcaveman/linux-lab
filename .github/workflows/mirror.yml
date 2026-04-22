@@ -1,7 +1,7 @@
 name: Linux Lab Sync
 on:
   schedule:
-    - cron: "*/5 * * * *" # Every 5 minutes
+    - cron: "*/7 * * * *" # Every 5 minutes
   workflow_dispatch:      # Allows manual trigger
 
 jobs:
