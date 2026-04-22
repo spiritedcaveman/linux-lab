@@ -1,0 +1,17 @@
+name: Full Kernel Mirror
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror Logic
+        run: |
+          # Bare clone from upstream
+          git clone --mirror https://github.com/torvalds/linux.git kernel.git
+          cd kernel.git
+
+          git push --mirror https://${{ secrets.CODEBERG_TOKEN }}@codeberg.org/YOUR_USERNAME/YOUR_REPO.git
