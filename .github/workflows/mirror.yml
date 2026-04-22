@@ -1,17 +1,25 @@
 name: Full Kernel Mirror
 on:
-  schedule:
-    - cron: "*/5 * * * *"
-  workflow_dispatch:
+  workflow_dispatch: 
 
 jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
-      - name: Mirror Logic
+      - name: Heavy Duty Mirror
         run: |
-          # Bare clone from upstream
+          # 1. Increase buffers to the max
+          git config --global http.postBuffer 1048576000
+          git config --global core.compression 9
+
+          #
           git clone --mirror https://github.com/torvalds/linux.git kernel.git
           cd kernel.git
 
-          git push --mirror https://${{ secrets.CODEBERG_TOKEN }}@codeberg.org/spiritedcaveman/linux-lab
+          # 3. Add Codeberg
+          git remote add codeberg https://${{ secrets.CODEBERG_TOKEN }}@codeberg.org/spiritedcaveman/linux.git
+
+          
+          git push codeberg main
+          git push --tags codeberg
+          git push --mirror codeberg
