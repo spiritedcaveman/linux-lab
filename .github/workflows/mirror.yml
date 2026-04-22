@@ -17,7 +17,7 @@ jobs:
           cd kernel.git
 
           # 3. Add Codeberg
-          git remote add codeberg https://${{ secrets.CODEBERG_TOKEN }}@codeberg.org/spiritedcaveman/linux.git
+          git remote add codeberg https://${{ secrets.CODEBERG_TOKEN }}@codeberg.org/spiritedcaveman/linux-lab.git
 
           
           git push codeberg main
