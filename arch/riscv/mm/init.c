@@ -37,7 +37,9 @@
 
 #include "../kernel/head.h"
 
+#if defined(CONFIG_64BIT) && defined(CONFIG_MMU)
 DECLARE_BITMAP(new_valid_map_cpus, NR_CPUS);
+#endif
 
 struct kernel_mapping kernel_map __ro_after_init;
 EXPORT_SYMBOL(kernel_map);
@@ -61,7 +63,8 @@ EXPORT_SYMBOL(phys_ram_base);
 
 #ifdef CONFIG_SPARSEMEM_VMEMMAP
 #define VMEMMAP_ADDR_ALIGN	max(1ULL << SECTION_SIZE_BITS, \
-				    MAX_FOLIO_VMEMMAP_ALIGN)
+				    PFN_PHYS(MAX_FOLIO_VMEMMAP_ALIGN / \
+					     sizeof(struct page)))
 
 unsigned long vmemmap_start_pfn __ro_after_init;
 EXPORT_SYMBOL(vmemmap_start_pfn);

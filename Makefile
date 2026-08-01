@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0
 VERSION = 7
-PATCHLEVEL = 1
+PATCHLEVEL = 2
 SUBLEVEL = 0
-EXTRAVERSION =
+EXTRAVERSION = -rc5
 NAME = Baby Opossum Posse
 
 # *DOCUMENTATION*
@@ -475,6 +475,10 @@ KBUILD_USERLDFLAGS := $(USERLDFLAGS)
 
 # These flags apply to all Rust code in the tree, including the kernel and
 # host programs.
+#
+# `-Aclippy::unwrap_or_default`: the lint is buggy [1] and ignores our
+# MSRV. It can trigger depending on the optimization level.
+# [1] https://github.com/rust-lang/rust-clippy/issues/17379
 export rust_common_flags := --edition=2021 \
 			    -Zbinary_dep_depinfo=y \
 			    -Astable_features \
@@ -503,6 +507,7 @@ export rust_common_flags := --edition=2021 \
 			    -Aclippy::uninlined_format_args \
 			    -Wclippy::unnecessary_safety_comment \
 			    -Wclippy::unnecessary_safety_doc \
+			    -Aclippy::unwrap_or_default \
 			    -Wrustdoc::missing_crate_level_docs \
 			    -Wrustdoc::unescaped_backticks
 
@@ -528,6 +533,9 @@ OBJCOPY		= $(LLVM_PREFIX)llvm-objcopy$(LLVM_SUFFIX)
 OBJDUMP		= $(LLVM_PREFIX)llvm-objdump$(LLVM_SUFFIX)
 READELF		= $(LLVM_PREFIX)llvm-readelf$(LLVM_SUFFIX)
 STRIP		= $(LLVM_PREFIX)llvm-strip$(LLVM_SUFFIX)
+ifeq ($(filter -fuse-ld=% --ld-path=%,$(KBUILD_HOSTLDFLAGS)),)
+KBUILD_HOSTLDFLAGS += -fuse-ld=lld
+endif
 else
 CC		= $(CROSS_COMPILE)gcc
 LD		= $(CROSS_COMPILE)ld
@@ -692,13 +700,11 @@ filechk_makefile = { \
 	echo "include $(abs_srctree)/Makefile"; \
 	}
 
-$(objtree)/Makefile: FORCE
+PHONY += $(CURDIR)/Makefile
+$(CURDIR)/Makefile: FORCE
 	$(call filechk,makefile)
 
-# Prevent $(srcroot)/Makefile from inhibiting the rule to run.
-PHONY += $(objtree)/Makefile
-
-outputmakefile: $(objtree)/Makefile
+outputmakefile: $(CURDIR)/Makefile
 ifeq ($(KBUILD_EXTMOD),)
 	@if [ -f $(srctree)/.config -o \
 		 -d $(srctree)/include/config -o \
@@ -790,7 +796,7 @@ endif
 # in addition to whatever we do anyway.
 # Just "make" or "make all" shall build modules as well
 
-ifneq ($(filter all modules nsdeps compile_commands.json clang-%,$(MAKECMDGOALS)),)
+ifneq ($(filter all modules nsdeps compile_commands.json clang-% sbom,$(MAKECMDGOALS)),)
   KBUILD_MODULES := y
 endif
 
@@ -961,6 +967,9 @@ KBUILD_CFLAGS += $(stackp-flags-y)
 ifdef CONFIG_FRAME_POINTER
 KBUILD_CFLAGS	+= -fno-omit-frame-pointer -fno-optimize-sibling-calls
 KBUILD_RUSTFLAGS += -Cforce-frame-pointers=y
+# Work around rustc bug on compilers without
+# https://github.com/rust-lang/rust/pull/156980.
+KBUILD_RUSTFLAGS += $(if $(call rustc-min-version,109800),,-Zllvm_module_flag=frame-pointer:u32:2:max)
 else
 # Some targets (ARM with Thumb2, for example), can't be built with frame
 # pointers.  For those, we don't have FUNCTION_TRACER automatically
@@ -1721,7 +1730,7 @@ CLEAN_FILES += vmlinux.symvers modules-only.symvers \
 	       vmlinux.thinlto-index builtin.order \
 	       compile_commands.json rust/test \
 	       rust-project.json .vmlinux.objs .vmlinux.export.c \
-               .builtin-dtbs-list .builtin-dtbs.S
+	       .builtin-dtbs-list .builtin-dtbs.S sbom-*.spdx.json
 
 # Directories & files removed with 'make mrproper'
 MRPROPER_FILES += include/config include/generated          \
@@ -1842,6 +1851,7 @@ help:
 	@echo  ''
 	@echo  'Tools:'
 	@echo  '  nsdeps          - Generate missing symbol namespace dependencies'
+	@echo  '  sbom            - Generate Software Bill of Materials'
 	@echo  ''
 	@echo  'Kernel selftest:'
 	@echo  '  kselftest         - Build and run kernel selftest'
@@ -2231,6 +2241,29 @@ PHONY += nsdeps
 nsdeps: export KBUILD_NSDEPS=1
 nsdeps: modules
 	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/nsdeps
+
+# Script to generate .spdx.json SBOM documents describing the build
+# ---------------------------------------------------------------------------
+
+ifdef building_out_of_srctree
+sbom_targets := sbom-source.spdx.json
+endif
+sbom_targets += sbom-build.spdx.json sbom-output.spdx.json
+quiet_cmd_sbom = GEN     $(sbom_targets)
+      cmd_sbom = printf "%s\n" "$(KBUILD_IMAGE)" >"$(tmp-target)"; \
+                 $(if $(CONFIG_MODULES),sed 's/\.o$$/.ko/' $(objtree)/modules.order >> "$(tmp-target)";) \
+                 $(PYTHON3) $(srctree)/scripts/sbom/sbom.py \
+                     --src-tree $(abspath $(srctree)) \
+                     --obj-tree $(abspath $(objtree)) \
+                     --roots-file "$(tmp-target)" \
+                     --output-directory $(abspath $(objtree)) \
+                     --generate-spdx \
+                     --package-license "GPL-2.0 WITH Linux-syscall-note" \
+                     --package-version "$(KERNELVERSION)" \
+                     --write-output-on-error;
+PHONY += sbom
+sbom: $(notdir $(KBUILD_IMAGE)) include/generated/autoconf.h $(if $(CONFIG_MODULES),modules modules.order)
+	$(call cmd,sbom)
 
 # Clang Tooling
 # ---------------------------------------------------------------------------
