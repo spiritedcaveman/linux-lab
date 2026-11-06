@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /*
  * Copyright 2012-15 Advanced Micro Devices, Inc.
  *
@@ -1073,7 +1074,6 @@ static bool dcn401_program_pix_clk(
 		enum dp_link_encoding encoding,
 		struct pll_settings *pll_settings)
 {
-	(void)encoding;
 	struct dce110_clk_src *clk_src = TO_DCE110_CLK_SRC(clock_source);
 	unsigned int inst = pix_clk_params->controller_id - CONTROLLER_ID_D0;
 	const struct pixel_rate_range_table_entry *e =
@@ -1081,6 +1081,7 @@ static bool dcn401_program_pix_clk(
 	struct bp_pixel_clock_parameters bp_pc_params = {0};
 	enum transmitter_color_depth bp_pc_colour_depth = TRANSMITTER_COLOR_DEPTH_24;
 	struct dp_dto_params dto_params = { 0 };
+	(void)encoding;
 
 	dto_params.otg_inst = inst;
 	dto_params.signal = pix_clk_params->signal_type;
@@ -1117,6 +1118,10 @@ static bool dcn401_program_pix_clk(
 		if (clock_source->ctx->dc->caps.is_apu &&
 			pix_clk_params->requested_pix_clk_100hz &&
 			dc_is_hdmi_frl_signal(pix_clk_params->signal_type)) {
+			//make sure dtbclk is enabled
+			if (clock_source->ctx->dc->clk_mgr->funcs->request_dtbclk)
+				clock_source->ctx->dc->clk_mgr->funcs->request_dtbclk(
+					clock_source->ctx->dc->clk_mgr, true);
 			/*need hdmistreamclk before vpg block register access*/
 			clock_source->ctx->dc->res_pool->dccg->funcs->set_hdmistreamclk(
 				clock_source->ctx->dc->res_pool->dccg,
@@ -1228,9 +1233,9 @@ static bool get_dp_dto_frequency_100hz(
 			 */
 			modulo_hz = REG_READ(MODULO[inst]);
 			if (modulo_hz) {
-				temp = clock_hz * dp_dto_ref_khz * 10;
+				temp = (unsigned long long)clock_hz * dp_dto_ref_khz * 10;
 				ASSERT(temp <= UINT_MAX * modulo_hz * 100ULL);
-				*pixel_clk_100hz = div_u64(temp, modulo_hz * 100);
+				*pixel_clk_100hz = (unsigned int)div_u64(temp, modulo_hz * 100);
 			} else
 				*pixel_clk_100hz = 0;
 		} else {
@@ -1289,7 +1294,7 @@ static bool dcn401_get_dp_dto_frequency_100hz(const struct clock_source *clock_s
 			BREAK_TO_DEBUGGER();
 			*pixel_clk_100hz = 0;
 		} else {
-			*pixel_clk_100hz = div_u64(temp, 100);
+			*pixel_clk_100hz = (unsigned int)div_u64(temp, 100);
 		}
 
 		return true;
@@ -1487,6 +1492,13 @@ static const struct clock_source_funcs dcn31_clk_src_funcs = {
 };
 
 static const struct clock_source_funcs dcn401_clk_src_funcs = {
+	.cs_power_down = dce110_clock_source_power_down,
+	.program_pix_clk = dcn401_program_pix_clk,
+	.get_pix_clk_dividers = dcn3_get_pix_clk_dividers,
+	.get_dp_dto_frequency_100hz = dcn401_get_dp_dto_frequency_100hz
+};
+
+static const struct clock_source_funcs dcn50_clk_src_funcs = {
 	.cs_power_down = dce110_clock_source_power_down,
 	.program_pix_clk = dcn401_program_pix_clk,
 	.get_pix_clk_dividers = dcn3_get_pix_clk_dividers,
@@ -1745,6 +1757,7 @@ bool dce110_clk_src_construct(
 	clk_src->base.ctx = ctx;
 	clk_src->bios = bios;
 	clk_src->base.id = id;
+	clk_src->base.inst = (unsigned int)id;
 	clk_src->base.funcs = &dce110_clk_src_funcs;
 
 	clk_src->regs = regs;
@@ -1843,6 +1856,7 @@ bool dce112_clk_src_construct(
 	clk_src->base.ctx = ctx;
 	clk_src->bios = bios;
 	clk_src->base.id = id;
+	clk_src->base.inst = (unsigned int)id;
 	clk_src->base.funcs = &dce112_clk_src_funcs;
 
 	clk_src->regs = regs;
@@ -1922,6 +1936,23 @@ bool dcn401_clk_src_construct(
 
 	return ret;
 }
+
+bool dcn50_clk_src_construct(
+	struct dce110_clk_src *clk_src,
+	struct dc_context *ctx,
+	struct dc_bios *bios,
+	enum clock_source_id id,
+	const struct dce110_clk_src_regs *regs,
+	const struct dce110_clk_src_shift *cs_shift,
+	const struct dce110_clk_src_mask *cs_mask)
+{
+	bool ret = dce112_clk_src_construct(clk_src, ctx, bios, id, regs, cs_shift, cs_mask);
+
+	clk_src->base.funcs = &dcn50_clk_src_funcs;
+
+	return ret;
+}
+
 bool dcn301_clk_src_construct(
 	struct dce110_clk_src *clk_src,
 	struct dc_context *ctx,

@@ -421,6 +421,20 @@ static inline void hda_dsp_sdw_process_mic_privacy(struct snd_sof_dev *sdev) { }
 /* pre fw run operations */
 int hda_dsp_pre_fw_run(struct snd_sof_dev *sdev)
 {
+	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
+	const struct sof_intel_dsp_desc *chip = hda->desc;
+	int ret;
+
+	/* Power down DSP if left enabled to ensure a clean boot state. */
+	if (hda_dsp_core_is_enabled(sdev, chip->host_managed_cores_mask)) {
+		dev_dbg(sdev->dev, "DSP core enabled, power down DSP first\n");
+
+		ret = chip->power_down_dsp(sdev);
+		if (ret < 0)
+			dev_warn(sdev->dev,
+				 "%s: failed to power down already-enabled DSP\n", __func__);
+	}
+
 	/* disable clock gating and power gating */
 	return hda_dsp_ctrl_clock_power_gating(sdev, false);
 }
@@ -625,8 +639,6 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 		return ret;
 	}
 
-	hda_bus_ml_init(bus);
-
 	/* Skip SoundWire if it is not supported */
 	if (!(interface_mask & BIT(SOF_DAI_INTEL_ALH)))
 		goto skip_soundwire;
@@ -669,8 +681,6 @@ skip_soundwire:
 
 	if (!HDA_IDISP_CODEC(bus->codec_mask))
 		hda_codec_i915_display_power(sdev, false);
-
-	hda_bus_ml_put_all(bus);
 
 	return 0;
 }
@@ -929,6 +939,7 @@ disable_pp_cap:
 		hda_dsp_ctrl_ppcap_enable(sdev, false);
 	}
 free_ipc_irq:
+	hda_dsp_ctrl_stop_chip(sdev);
 	free_irq(sdev->ipc_irq, sdev);
 free_irq_vector:
 	if (sdev->msi_enabled)
@@ -996,6 +1007,9 @@ void hda_dsp_remove(struct snd_sof_dev *sdev)
 		snd_dma_free_pages(&hda->iccmax_dmab);
 
 skip_disable_dsp:
+	/* stop CORB/RIRB and position buffer DMA before the buffers are freed */
+	hda_dsp_ctrl_stop_chip(sdev);
+
 	free_irq(sdev->ipc_irq, sdev);
 	if (sdev->msi_enabled)
 		pci_free_irq_vectors(pci);

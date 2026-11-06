@@ -5,23 +5,34 @@
  *
  * Copyright 2019 Analog Devices Inc.
  */
+
+#include <linux/array_size.h>
 #include <linux/bitfield.h>
+#include <linux/bitops.h>
 #include <linux/completion.h>
+#include <linux/container_of.h>
+#include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/err.h>
-#include <linux/errno.h>
-#include <linux/kernel.h>
-#include <linux/iio/iio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
 #include <linux/list.h>
+#include <linux/math64.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
+#include <linux/pm_runtime.h>
 #include <linux/property.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
+#include <linux/slab.h>
 #include <linux/spi/spi.h>
+#include <linux/string.h>
+#include <linux/types.h>
+#include <linux/unaligned.h>
 
 #include <asm/byteorder.h>
-#include <linux/unaligned.h>
+
+#include <linux/iio/iio.h>
 
 /* register map */
 #define LTC2983_STATUS_REG			0x0000
@@ -1994,7 +2005,7 @@ static int ltc2983_probe(struct spi_device *spi)
 	ret = devm_request_irq(dev, spi->irq, ltc2983_irq_handler,
 			       IRQF_TRIGGER_RISING, st->info->name, st);
 	if (ret)
-		return dev_err_probe(dev, ret, "failed to request an irq\n");
+		return ret;
 
 	if (st->info->has_eeprom) {
 		ret = ltc2983_eeprom_cmd(st, LTC2983_EEPROM_WRITE_CMD,
@@ -2070,11 +2081,11 @@ static const struct ltc2983_chip_info ltm2985_chip_info_data = {
 };
 
 static const struct spi_device_id ltc2983_id_table[] = {
-	{ "adt7604", (kernel_ulong_t)&adt7604_chip_info_data },
-	{ "ltc2983", (kernel_ulong_t)&ltc2983_chip_info_data },
-	{ "ltc2984", (kernel_ulong_t)&ltc2984_chip_info_data },
-	{ "ltc2986", (kernel_ulong_t)&ltc2986_chip_info_data },
-	{ "ltm2985", (kernel_ulong_t)&ltm2985_chip_info_data },
+	{ .name = "adt7604", .driver_data = (kernel_ulong_t)&adt7604_chip_info_data },
+	{ .name = "ltc2983", .driver_data = (kernel_ulong_t)&ltc2983_chip_info_data },
+	{ .name = "ltc2984", .driver_data = (kernel_ulong_t)&ltc2984_chip_info_data },
+	{ .name = "ltc2986", .driver_data = (kernel_ulong_t)&ltc2986_chip_info_data },
+	{ .name = "ltm2985", .driver_data = (kernel_ulong_t)&ltm2985_chip_info_data },
 	{ }
 };
 MODULE_DEVICE_TABLE(spi, ltc2983_id_table);

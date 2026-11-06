@@ -787,10 +787,6 @@ static int lan937x_setup(struct dsa_switch *ds)
 		return ret;
 	}
 
-	ret = ksz_parse_drive_strength(dev);
-	if (ret)
-		return ret;
-
 	/* set broadcast storm protection 10% rate */
 	storm_mask = BROADCAST_STORM_RATE;
 	storm_rate = (BROADCAST_STORM_VALUE * BROADCAST_STORM_PROT_RATE) / 100;
@@ -871,6 +867,7 @@ static int lan937x_setup(struct dsa_switch *ds)
 		}
 	}
 
+	ksz_ptp_set_caps(ds);
 	ret = ksz_ptp_clock_register(ds);
 	if (ret) {
 		dev_err(dev->dev, "Failed to register PTP clock: %d\n",
@@ -983,7 +980,7 @@ const struct dsa_switch_ops lan937x_switch_ops = {
 	.get_stats64		= ksz_get_stats64,
 	.get_pause_stats	= ksz_get_pause_stats,
 	.port_change_mtu	= lan937x_change_mtu,
-	.port_max_mtu		= ksz_max_mtu,
+	.port_max_mtu		= ksz9477_max_mtu,
 	.suspend		= ksz_suspend,
 	.resume			= ksz_resume,
 	.get_ts_info		= ksz_get_ts_info,

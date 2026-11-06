@@ -195,12 +195,10 @@ static int fdl_load_file(struct sdca_interrupt *interrupt,
 {
 	struct device *dev = interrupt->dev;
 	struct sdca_fdl_data *fdl_data = &interrupt->function->fdl_data;
-	const struct firmware *firmware = NULL;
 	struct acpi_sw_file *swf = NULL, *tmp;
 	struct sdca_fdl_file *fdl_file;
 	char *disk_filename;
 	int ret;
-	int i;
 
 	if (!set) {
 		dev_err(dev, "request to load SWF with no set\n");
@@ -210,9 +208,18 @@ static int fdl_load_file(struct sdca_interrupt *interrupt,
 	fdl_file = &set->files[file_index];
 
 	if (fdl_data->swft) {
-		tmp = fdl_data->swft->files;
-		for (i = 0; i < fdl_data->swft->header.length; i += tmp->file_length,
-		     tmp = ACPI_ADD_PTR(struct acpi_sw_file, tmp, tmp->file_length)) {
+		struct acpi_sw_file *table_end, *next;
+
+		table_end = ACPI_ADD_PTR(struct acpi_sw_file, fdl_data->swft,
+					 fdl_data->swft->header.length);
+		for (tmp = fdl_data->swft->files; tmp + 1 <= table_end; tmp = next) {
+			next = ACPI_ADD_PTR(struct acpi_sw_file, tmp, tmp->file_length);
+
+			if (tmp->file_length < sizeof(*tmp) || next > table_end) {
+				dev_err(dev, "bad file length in SWFT: %u\n", tmp->file_length);
+				break;
+			}
+
 			if (tmp->vendor_id == fdl_file->vendor_id &&
 			    tmp->file_id == fdl_file->file_id) {
 				dev_dbg(dev, "located SWF in ACPI: %x-%x-%x\n",
@@ -230,6 +237,7 @@ static int fdl_load_file(struct sdca_interrupt *interrupt,
 
 	dev_dbg(dev, "FDL disk filename: %s\n", disk_filename);
 
+	const struct firmware *firmware __free(firmware) = NULL;
 	ret = firmware_request_nowarn(&firmware, disk_filename, dev);
 	kfree(disk_filename);
 	if (ret) {
@@ -258,8 +266,7 @@ static int fdl_load_file(struct sdca_interrupt *interrupt,
 
 	if (!swf) {
 		dev_err(dev, "failed to locate SWF\n");
-		ret = -ENOENT;
-		goto error;
+		return -ENOENT;
 	}
 
 	dev_info(dev, "loading SWF: %x-%x-%x\n",
@@ -271,9 +278,6 @@ static int fdl_load_file(struct sdca_interrupt *interrupt,
 				     SDCA_CTL_XU_FDL_MESSAGEOFFSET, fdl_file->fdl_offset,
 				     SDCA_CTL_XU_FDL_MESSAGELENGTH, swf->data,
 				     swf->file_length - offsetof(struct acpi_sw_file, data));
-
-error:
-	release_firmware(firmware);
 	return ret;
 }
 
@@ -297,6 +301,8 @@ static struct sdca_fdl_set *fdl_get_set(struct sdca_interrupt *interrupt)
 
 	range = sdca_selector_find_range(dev, xu, SDCA_CTL_XU_FDL_SET_INDEX,
 					 SDCA_FDL_SET_INDEX_NCOLS, 0);
+	if (!range)
+		return NULL;
 
 	val = sdca_range_search(range, SDCA_FDL_SET_INDEX_SET_NUMBER,
 				val, SDCA_FDL_SET_INDEX_FILE_SET_ID);

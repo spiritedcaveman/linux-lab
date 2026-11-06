@@ -603,6 +603,9 @@ static int panthor_fw_load_section_entry(struct panthor_device *ptdev,
 		return -EINVAL;
 	}
 
+	if (!section_size)
+		return 0;
+
 	name_len = iter->size - iter->offset;
 
 	section = drmm_kzalloc(&ptdev->base, sizeof(*section), GFP_KERNEL);
@@ -704,7 +707,8 @@ static int panthor_fw_read_build_info(struct panthor_device *ptdev,
 		return ret;
 
 	if (hdr.meta_start > fw->size ||
-	    hdr.meta_start + hdr.meta_size > fw->size) {
+	    hdr.meta_size > fw->size - hdr.meta_start ||
+	    hdr.meta_size <= header_len) {
 		drm_err(&ptdev->base, "Firmware build info corrupt\n");
 		/* We don't need the build info, so continue */
 		return 0;
@@ -891,14 +895,15 @@ static int panthor_init_cs_iface(struct panthor_device *ptdev,
 	struct panthor_fw_csg_iface *csg_iface = panthor_fw_get_csg_iface(ptdev, csg_idx);
 	struct panthor_fw_cs_iface *cs_iface = &ptdev->fw->iface.streams[csg_idx][cs_idx];
 	u64 shared_section_sz = panthor_kernel_bo_size(ptdev->fw->shared_section->mem);
-	u32 iface_offset = CSF_GROUP_CONTROL_OFFSET +
-			   (csg_idx * glb_iface->control->group_stride) +
+	u64 iface_offset = CSF_GROUP_CONTROL_OFFSET +
+			   ((u64)csg_idx * glb_iface->control->group_stride) +
 			   CSF_STREAM_CONTROL_OFFSET +
-			   (cs_idx * csg_iface->control->stream_stride);
+			   ((u64)cs_idx * csg_iface->control->stream_stride);
 	struct panthor_fw_cs_iface *first_cs_iface =
 		panthor_fw_get_cs_iface(ptdev, 0, 0);
 
-	if (iface_offset + sizeof(*cs_iface) >= shared_section_sz)
+	if (iface_offset > shared_section_sz ||
+	    sizeof(*cs_iface->control) > shared_section_sz - iface_offset)
 		return -EINVAL;
 
 	spin_lock_init(&cs_iface->lock);
@@ -948,10 +953,12 @@ static int panthor_init_csg_iface(struct panthor_device *ptdev,
 	struct panthor_fw_global_iface *glb_iface = panthor_fw_get_glb_iface(ptdev);
 	struct panthor_fw_csg_iface *csg_iface = &ptdev->fw->iface.groups[csg_idx];
 	u64 shared_section_sz = panthor_kernel_bo_size(ptdev->fw->shared_section->mem);
-	u32 iface_offset = CSF_GROUP_CONTROL_OFFSET + (csg_idx * glb_iface->control->group_stride);
+	u64 iface_offset = CSF_GROUP_CONTROL_OFFSET +
+			   ((u64)csg_idx * glb_iface->control->group_stride);
 	unsigned int i;
 
-	if (iface_offset + sizeof(*csg_iface) >= shared_section_sz)
+	if (iface_offset > shared_section_sz ||
+	    sizeof(*csg_iface->control) > shared_section_sz - iface_offset)
 		return -EINVAL;
 
 	spin_lock_init(&csg_iface->lock);
@@ -1003,9 +1010,13 @@ static u32 panthor_get_instr_features(struct panthor_device *ptdev)
 static int panthor_fw_init_ifaces(struct panthor_device *ptdev)
 {
 	struct panthor_fw_global_iface *glb_iface = &ptdev->fw->iface.global;
+	u64 shared_section_sz = panthor_kernel_bo_size(ptdev->fw->shared_section->mem);
 	unsigned int i;
 
 	if (!ptdev->fw->shared_section->mem->kmap)
+		return -EINVAL;
+
+	if (sizeof(*glb_iface->control) > shared_section_sz)
 		return -EINVAL;
 
 	spin_lock_init(&glb_iface->lock);
@@ -1084,8 +1095,9 @@ static void panthor_fw_init_global_iface(struct panthor_device *ptdev)
 			 msecs_to_jiffies(PING_INTERVAL_MS));
 }
 
-static void panthor_job_irq_handler(struct panthor_device *ptdev, u32 status)
+static void panthor_job_irq_handler(struct panthor_irq *pirq, u32 status)
 {
+	struct panthor_device *ptdev = pirq->ptdev;
 	u32 duration;
 	u64 start = 0;
 
@@ -1111,7 +1123,11 @@ static void panthor_job_irq_handler(struct panthor_device *ptdev, u32 status)
 		trace_gpu_job_irq(ptdev->base.dev, status, duration);
 	}
 }
-PANTHOR_IRQ_HANDLER(job, panthor_job_irq_handler);
+
+static irqreturn_t panthor_job_irq_threaded_handler(int irq, void *data)
+{
+	return panthor_irq_default_threaded_handler(data, panthor_job_irq_handler);
+}
 
 static int panthor_fw_start(struct panthor_device *ptdev)
 {
@@ -1119,8 +1135,8 @@ static int panthor_fw_start(struct panthor_device *ptdev)
 	bool timedout = false;
 
 	ptdev->fw->booted = false;
-	panthor_job_irq_enable_events(&ptdev->fw->irq, ~0);
-	panthor_job_irq_resume(&ptdev->fw->irq);
+	panthor_irq_enable_events(&ptdev->fw->irq, ~0);
+	panthor_irq_resume(&ptdev->fw->irq);
 	gpu_write(fw->iomem, MCU_CONTROL, MCU_CONTROL_AUTO);
 
 	if (!wait_event_timeout(ptdev->fw->req_waitqueue,
@@ -1230,7 +1246,7 @@ void panthor_fw_pre_reset(struct panthor_device *ptdev, bool on_hang)
 			ptdev->reset.fast = true;
 	}
 
-	panthor_job_irq_suspend(&ptdev->fw->irq);
+	panthor_irq_suspend(&ptdev->fw->irq);
 	panthor_fw_stop(ptdev);
 }
 
@@ -1299,7 +1315,7 @@ void panthor_fw_unplug(struct panthor_device *ptdev)
 
 	if (!IS_ENABLED(CONFIG_PM) || pm_runtime_active(ptdev->base.dev)) {
 		/* Make sure the IRQ handler cannot be called after that point. */
-		panthor_job_irq_suspend(&ptdev->fw->irq);
+		panthor_irq_suspend(&ptdev->fw->irq);
 		panthor_fw_stop(ptdev);
 	}
 
@@ -1494,8 +1510,9 @@ int panthor_fw_init(struct panthor_device *ptdev)
 	if (irq <= 0)
 		return -ENODEV;
 
-	ret = panthor_request_job_irq(ptdev, &fw->irq, irq,
-				      ptdev->iomem + JOB_INT_BASE);
+	ret = panthor_irq_request(ptdev, &fw->irq, irq,
+				  ptdev->iomem + JOB_INT_BASE, "job",
+				  panthor_job_irq_threaded_handler);
 	if (ret) {
 		drm_err(&ptdev->base, "failed to request job irq");
 		return ret;

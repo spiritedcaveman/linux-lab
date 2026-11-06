@@ -2944,11 +2944,8 @@ static int qm_alloc_uacce(struct hisi_qm *qm)
 		.flags = UACCE_DEV_SVA,
 		.ops = &uacce_qm_ops,
 	};
-	int ret;
 
-	ret = strscpy(interface.name, dev_driver_string(&pdev->dev),
-		      sizeof(interface.name));
-	if (ret < 0)
+	if (strscpy(interface.name, dev_driver_string(&pdev->dev)) < 0)
 		return -ENAMETOOLONG;
 
 	uacce = uacce_alloc(&pdev->dev, &interface);
@@ -5746,8 +5743,8 @@ static int qm_pre_store_caps(struct hisi_qm *qm)
 							i, qm->cap_ver);
 	}
 
-	qm->cap_tables.qm_cap_table = qm_cap;
 	qm->cap_tables.qm_cap_size = size;
+	qm->cap_tables.qm_cap_table = qm_cap;
 
 	return 0;
 }
